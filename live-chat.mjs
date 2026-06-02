@@ -1,11 +1,19 @@
 import 'dotenv/config';
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { TikTokLiveConnection, WebcastEvent, ControlEvent } from './dist/index.js';
 
-const username = process.argv[2] || 'kysameira';
+const username = process.argv[2] || 'nutshellbear';
 const signApiKey = process.env.SIGN_API_KEY?.trim();
+const logDir = process.env.LIVE_CHAT_LOG_DIR || 'logs';
+const sessionStartedAt = new Date().toISOString().replace(/[:.]/g, '-');
+const safeUsername = username.replace(/[^a-zA-Z0-9_-]/g, '_');
+const analysisLogPath = join(logDir, `live-chat-analysis-events-${safeUsername}-${sessionStartedAt}.log`);
+
+mkdirSync(logDir, { recursive: true });
 
 const connection = new TikTokLiveConnection(username, {
-  processInitialData: false,
+  processInitialData: true,
   ...(signApiKey ? { signApiKey } : {}),
 });
 
@@ -15,6 +23,10 @@ function now() {
 
 function logEvent(type, message) {
   console.log(`[${now()}] [${type}] ${message}`);
+}
+
+function appendAnalysisLogLine(type, message) {
+  appendFileSync(analysisLogPath, `[${now()}] [${type}] ${message}\n`, 'utf8');
 }
 
 function printNetworkHelp(error) {
@@ -57,6 +69,7 @@ connection.on(WebcastEvent.CHAT, (data) => {
   const user = getUserName(data.user);
   const text = data.content || data.comment || '';
   logEvent('chat', `${user}: ${text}`);
+  appendAnalysisLogLine('chat', `${user}: ${text}`);
 });
 
 connection.on(WebcastEvent.GIFT, (data) => {
@@ -67,41 +80,48 @@ connection.on(WebcastEvent.GIFT, (data) => {
   const text = textFromRichText(data.displayTextForAudience || data.trayDisplayText);
 
   logEvent('gift', `${user} sent ${giftName} x${count}${diamonds ? ` (${diamonds} diamonds each)` : ''}${text ? ` - ${text}` : ''}`);
+  appendAnalysisLogLine('gift', `${user} sent ${giftName} x${count}${diamonds ? ` (${diamonds} diamonds each)` : ''}${text ? ` - ${text}` : ''}`);
 });
 
 connection.on(WebcastEvent.FOLLOW, (data) => {
   const user = getUserName(data.user);
   const followCount = data.followCount ? `, host followers=${data.followCount}` : '';
   logEvent('follow', `${user} followed the host${followCount}`);
+  appendAnalysisLogLine('follow', `${user} followed the host${followCount}`);
 });
 
 connection.on(WebcastEvent.SHARE, (data) => {
   const user = getUserName(data.user);
   const shareCount = data.shareCount ? `, shares=${data.shareCount}` : '';
   logEvent('share', `${user} shared the live${shareCount}`);
+  appendAnalysisLogLine('share', `${user} shared the live${shareCount}`);
 });
 
 connection.on(WebcastEvent.LIKE, (data) => {
   const user = getUserName(data.user);
   logEvent('like', `${user} liked x${data.count}, total=${data.total}`);
+  appendAnalysisLogLine('like', `${user} liked x${data.count}, total=${data.total}`);
 });
 
 connection.on(WebcastEvent.MEMBER, (data) => {
   const user = getUserName(data.user);
   const action = data.actionDescription || 'joined';
   logEvent('member', `${user} ${action}, viewers=${data.memberCount}`);
+  appendAnalysisLogLine('member', `${user} ${action}, viewers=${data.memberCount}`);
 });
 
 connection.on(WebcastEvent.ROOM_USER, (data) => {
   const total = data.totalUser || data.total || 'unknown';
   const popularity = data.popularity ? `, popularity=${data.popularity}` : '';
   logEvent('roomUser', `viewers=${total}${popularity}`);
+  appendAnalysisLogLine('roomUser', `viewers=${total}${popularity}`);
 });
 
 connection.on(WebcastEvent.SUB_NOTIFY, (data) => {
   const user = getUserName(data.user);
   const months = data.subMonth ? `, months=${data.subMonth}` : '';
   logEvent('subscribe', `${user} subscribed${months}`);
+  appendAnalysisLogLine('subscribe', `${user} subscribed${months}`);
 });
 
 connection.on(WebcastEvent.STREAM_END, ({ action }) => {
@@ -119,6 +139,7 @@ connection.on(ControlEvent.DISCONNECTED, (event) => {
 
 try {
   console.log('connecting to:', username);
+  console.log('analysis event log:', analysisLogPath);
   if (!signApiKey) {
     console.warn('SIGN_API_KEY is not set. WebSocket signing may fail or be rate limited.');
   }
